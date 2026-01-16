@@ -62,13 +62,13 @@ HEADERS = {
 }
 BASE_URL = "https://api-football-v1.p.rapidapi.com/v3"
 
-TEMPORADA = 2026 # Estamos em 2026
+# IDs das ligas que seguem calendário europeu (começam no meio do ano)
+LIGAS_EUROPEIAS = [39, 140, 135, 78, 61, 94]
 
-# --- CORREÇÃO: DICIONÁRIO DE LIGAS ADICIONADO ---
 LIGAS_IDS = {
     "Brasileirão Série A": 71,
     "Brasileirão Série B": 72,
-    "Campeonato Baiano": 479,  # Adicionei pois você é da Bahia
+    "Campeonato Baiano": 479,  
     "Premier League (ING)": 39,
     "La Liga (ESP)": 140,
     "Serie A (ITA)": 135,
@@ -121,20 +121,23 @@ def buscar_odds_reais(fixture_id):
     return None
 
 @st.cache_data(ttl=1800)
-def carregar_dados_liga(id_liga):
-    """Carrega histórico e próximos jogos de uma liga."""
+def carregar_dados_liga(id_liga, temporada):
+    """Carrega histórico e próximos jogos de uma liga com temporada dinâmica."""
     try:
         # Histórico
-        r_hist = requests.get(f"{BASE_URL}/fixtures", headers=HEADERS, params={"league": id_liga, "season": TEMPORADA, "status": "FT"})
+        r_hist = requests.get(f"{BASE_URL}/fixtures", headers=HEADERS, params={"league": id_liga, "season": temporada, "status": "FT"})
         jogos_hist = r_hist.json().get('response', [])
         
-        if not jogos_hist: return None, None
-        
-        df_hist = pd.DataFrame([{'home': j['teams']['home']['name'], 'away': j['teams']['away']['name'], 'gh': j['goals']['home'], 'ga': j['goals']['away']} for j in jogos_hist])
+        # Cria DataFrame mesmo se vazio para evitar erros
+        if not jogos_hist: 
+            df_hist = pd.DataFrame(columns=['home', 'away', 'gh', 'ga'])
+        else:
+            df_hist = pd.DataFrame([{'home': j['teams']['home']['name'], 'away': j['teams']['away']['name'], 'gh': j['goals']['home'], 'ga': j['goals']['away']} for j in jogos_hist])
         
         # Próximos Jogos
         hoje = datetime.now().date()
-        r_fut = requests.get(f"{BASE_URL}/fixtures", headers=HEADERS, params={"league": id_liga, "season": TEMPORADA, "status": "NS", "from": hoje.strftime("%Y-%m-%d"), "to": (hoje + timedelta(days=7)).strftime("%Y-%m-%d")})
+        # Busca jogos para os próximos 10 dias para garantir
+        r_fut = requests.get(f"{BASE_URL}/fixtures", headers=HEADERS, params={"league": id_liga, "season": temporada, "status": "NS", "from": hoje.strftime("%Y-%m-%d"), "to": (hoje + timedelta(days=10)).strftime("%Y-%m-%d")})
         jogos_fut = r_fut.json().get('response', [])
         
         return df_hist, jogos_fut
@@ -143,7 +146,7 @@ def carregar_dados_liga(id_liga):
         return None, None
 
 def processar_jogo(jogo, df_hist, m_casa_liga, m_fora_liga, banca):
-    """Processa um jogo individual e retorna análise completa."""
+    """Processa um jogo individual e retorna análise completa com tratamento para Cold Start."""
     f_id = jogo['fixture']['id']
     casa, fora = jogo['teams']['home']['name'], jogo['teams']['away']['name']
     data_dt = datetime.fromisoformat(jogo['fixture']['date'].replace('Z', '+00:00'))
@@ -152,12 +155,39 @@ def processar_jogo(jogo, df_hist, m_casa_liga, m_fora_liga, banca):
     h_casa = df_hist[df_hist['home'] == casa]
     h_fora = df_hist[df_hist['away'] == fora]
     
-    if len(h_casa) < 2 or len(h_fora) < 2:
-        return None
+    # --- LÓGICA DE COLD START (Início de Temporada) ---
+    # Se não tiver histórico suficiente (menos de 2 jogos), usamos a média da liga como base
+    # Isso permite que o código rode para Estaduais que estão começando agora
     
-    # Cálculo de Poisson
-    l_h = (h_casa['gh'].mean() / m_casa_liga) * (h_fora['ga'].mean() / m_fora_liga) * m_casa_liga
-    l_a = (h_fora['ga'].mean() / m_fora_liga) * (h_casa['gh'].mean() / m_casa_liga) * m_fora_liga
+    if len(h_casa) < 2:
+        media_gols_casa_mandante = m_casa_liga
+        media_gols_casa_sofridos = m_fora_liga # Assume defesa média
+    else:
+        media_gols_casa_mandante = h_casa['gh'].mean()
+        media_gols_casa_sofridos = h_casa['ga'].mean()
+
+    if len(h_fora) < 2:
+        media_gols_fora_visitante = m_fora_liga
+        media_gols_fora_sofridos = m_casa_liga # Assume defesa média
+    else:
+        media_gols_fora_visitante = h_fora['ga'].mean()
+        media_gols_fora_sofridos = h_fora['gh'].mean()
+    
+    # Evitar divisão por zero
+    if m_casa_liga == 0: m_casa_liga = 1
+    if m_fora_liga == 0: m_fora_liga = 1
+
+    # Cálculo dos Lambdas (Força de Ataque x Força de Defesa x Média da Liga)
+    # Lambda Home = (Ataque Casa / Media Liga Casa) * (Defesa Fora / Media Liga Fora) * Media Liga Casa
+    
+    atk_home = media_gols_casa_mandante / m_casa_liga
+    def_away = media_gols_fora_sofridos / m_casa_liga # Quantos gols o visitante toma em relacao a media de gols mandantes
+    
+    atk_away = media_gols_fora_visitante / m_fora_liga
+    def_home = media_gols_casa_sofridos / m_fora_liga
+    
+    l_h = atk_home * def_away * m_casa_liga
+    l_a = atk_away * def_home * m_fora_liga
     
     pv, pe, pd = calcular_poisson(l_h, l_a)
     fair_odd = 1/pv if pv > 0 else 99
@@ -247,13 +277,22 @@ with tab1:
         
         for nome_liga in ligas_selecionadas:
             id_liga = LIGAS_IDS[nome_liga]
-            df_hist, jogos_fut = carregar_dados_liga(id_liga)
             
-            if df_hist is None or not jogos_fut:
-                st.warning(f"⚠️ Sem dados para {nome_liga}")
+            # --- CORREÇÃO: LÓGICA DE TEMPORADA ---
+            # Se for liga europeia, usa 2025 (temporada atual). Se for Brasil, usa 2026.
+            temporada_atual = 2025 if id_liga in LIGAS_EUROPEIAS else 2026
+            
+            df_hist, jogos_fut = carregar_dados_liga(id_liga, temporada_atual)
+            
+            # Se não houver jogos futuros, pula
+            if jogos_fut is None or not jogos_fut:
                 continue
             
-            m_casa_liga, m_fora_liga = df_hist['gh'].mean(), df_hist['ga'].mean()
+            # Se não houver histórico (começo de campeonato), usa médias padrão para não quebrar
+            if df_hist.empty or len(df_hist) < 10:
+                m_casa_liga, m_fora_liga = 1.35, 1.10 # Médias genéricas conservadoras
+            else:
+                m_casa_liga, m_fora_liga = df_hist['gh'].mean(), df_hist['ga'].mean()
             
             for jogo in jogos_fut:
                 resultado = processar_jogo(jogo, df_hist, m_casa_liga, m_fora_liga, banca_total)
@@ -350,7 +389,7 @@ with tab1:
                 )
                 st.plotly_chart(fig_prob, use_container_width=True)
         else:
-            st.error("❌ Nenhum jogo encontrado com os critérios selecionados.")
+            st.warning("⚠️ Nenhum jogo encontrado. Verifique se as ligas selecionadas têm partidas nos próximos 7 dias.")
 
 # ==============================================================================
 # TAB 2: GESTÃO DE BANCA
