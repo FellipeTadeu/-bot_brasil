@@ -62,7 +62,20 @@ HEADERS = {
 }
 BASE_URL = "https://api-football-v1.p.rapidapi.com/v3"
 
-TEMPORADA = 2026
+TEMPORADA = 2026 # Estamos em 2026
+
+# --- CORREÇÃO: DICIONÁRIO DE LIGAS ADICIONADO ---
+LIGAS_IDS = {
+    "Brasileirão Série A": 71,
+    "Brasileirão Série B": 72,
+    "Campeonato Baiano": 479,  # Adicionei pois você é da Bahia
+    "Premier League (ING)": 39,
+    "La Liga (ESP)": 140,
+    "Serie A (ITA)": 135,
+    "Bundesliga (ALE)": 78,
+    "Ligue 1 (FRA)": 61,
+    "Primeira Liga (POR)": 94
+}
 
 # ==============================================================================
 # FUNÇÕES ESTATÍSTICAS (MOTOR V9)
