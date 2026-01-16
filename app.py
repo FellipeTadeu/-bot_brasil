@@ -55,19 +55,13 @@ st.markdown("""
 # ==============================================================================
 # CONFIGURAÇÕES E CONSTANTES
 # ==============================================================================
-API_KEY = "963ac0ad76beab3948236e72ac053867" 
+API_KEY = "a8267cf3a1c929aaa5a6451b683f7352" 
 HEADERS = {
     "x-rapidapi-key": API_KEY,
     "x-rapidapi-host": "api-football-v1.p.rapidapi.com"
 }
 BASE_URL = "https://api-football-v1.p.rapidapi.com/v3"
 
-LIGAS_IDS = {
-    "Paulista A1": 475,
-    "Carioca": 476,
-    "Mineiro": 477,
-    "Copa do Nordeste": 479
-}
 TEMPORADA = 2026
 
 # ==============================================================================
