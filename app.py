@@ -28,7 +28,9 @@ st.markdown("""
 def raspar_placar_futebol(url):
     try:
         # User-Agent para fingir ser um navegador comum e não ser bloqueado
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
         
         # Faz a requisição rápida (sem abrir navegador)
         response = requests.get(url, headers=headers, timeout=10)
@@ -38,22 +40,23 @@ def raspar_placar_futebol(url):
         
         jogos = []
         
-        # No Placar de Futebol, procuramos divs ou links com essas classes
-        # Esses seletores podem mudar com o tempo, mas 'match-list-item' é comum
+        # Tenta encontrar os jogos usando as classes comuns do site
+        # 'match-list-item' é o container padrão de jogos no placardefutebol.com.br
         for partida in soup.find_all(['div', 'a'], class_=['match-list-item', 'match-card', 'container-main']):
             try:
-                # Extrai todo o texto da partida e quebra em linhas
+                # Extrai todo o texto da partida e quebra em linhas limpas
                 linhas = [line.strip() for line in partida.get_text(separator='\n').split('\n') if line.strip()]
                 
                 # Lógica para achar Hora e Times
                 # Procura string com formato 00:00
                 hora = next((l for l in linhas if ":" in l and len(l) == 5), "00:00")
                 
-                # Filtra o que não é hora, nem status "Ao Vivo" para achar os times
-                times = [l for l in linhas if len(l) > 2 and ":" not in l and "Ao Vivo" not in l and "Final" not in l and "Intervalo" not in l]
+                # Filtra o que não é hora, nem status "Ao Vivo" para achar os nomes dos times
+                times = [l for l in linhas if len(l) > 2 and ":" not in l and "Ao Vivo" not in l and "Final" not in l and "Intervalo" not in l and "ENCERRADO" not in l]
                 
                 # Se achou pelo menos 2 nomes (Casa e Fora)
                 if len(times) >= 2:
+                    # Às vezes o nome do time é composto, pegamos o primeiro e o segundo elemento principal
                     jogos.append({
                         "hora": hora,
                         "casa": times[0],
@@ -73,7 +76,7 @@ def raspar_placar_futebol(url):
 
 def calcular_probabilidades(m_casa, m_fora):
     pv, pe, pd = 0, 0, 0
-    # Distribuição de Poisson
+    # Distribuição de Poisson para prever placares de 0x0 até 9x9
     for h in range(10):
         for a in range(10):
             p = poisson.pmf(h, m_casa) * poisson.pmf(a, m_fora)
@@ -119,24 +122,27 @@ st.write(f"Buscando dados de: **{liga}**...")
 dados_brutos = raspar_placar_futebol(urls[liga])
 
 if not dados_brutos:
-    st.warning(f"⚠️ Nenhum jogo encontrado em '{liga}' neste momento. Tente 'Jogos de Hoje (Geral)' ou verifique se há rodada.")
+    st.warning(f"⚠️ Nenhum jogo encontrado em '{liga}' neste momento. Tente 'Jogos de Hoje (Geral)' ou verifique se há rodada hoje.")
 else:
     resultados = []
     
     for j in dados_brutos:
-        # --- SIMULAÇÃO DE ANÁLISE (Aqui entraria seu Banco de Dados no futuro) ---
-        # Como não temos histórico, geramos forças aleatórias controladas para demonstração
+        # --- SIMULAÇÃO DE ANÁLISE ---
+        # Nota: Como scraping simples não traz estatísticas passadas (chutes, cantos),
+        # usamos uma simulação de força baseada na aleatoriedade controlada para demonstração.
+        # Em um app real de ADS, você conectaria isso a um banco de dados CSV com o histórico dos times.
+        
         f_casa = random.uniform(0.9, 1.6) # Time da casa tende a ser mais forte
         f_fora = random.uniform(0.8, 1.4)
         
-        # Médias de gols estimadas
+        # Médias de gols estimadas (Lambdas de Poisson)
         lambda_casa = 1.35 * f_casa
         lambda_fora = 1.10 * f_fora
         
         pv, pe, pd = calcular_probabilidades(lambda_casa, lambda_fora)
         
         odd_justa = 1/pv if pv > 0 else 100
-        odd_real_simulada = odd_justa * 0.90 # Simula margem da casa
+        odd_real_simulada = odd_justa * 0.90 # Simula a margem da casa de aposta (juice)
         
         ev = (pv * odd_real_simulada) - 1
         
@@ -171,17 +177,21 @@ else:
         hide_index=True
     )
 
-    # Gráfico
+    # Gráfico de Valor Esperado
     if not df.empty:
         col_graf1, col_graf2 = st.columns(2)
         with col_graf1:
             st.markdown("### Ranking de Valor Esperado")
+            # Ordena pelos melhores jogos
+            df_sorted = df.sort_values("EV (%)", ascending=False).head(10)
             fig = px.bar(
-                df.sort_values("EV (%)", ascending=False), 
+                df_sorted, 
                 x="EV (%)", 
                 y="Confronto", 
                 orientation='h',
                 color="EV (%)",
-                color_continuous_scale="RdYlGn"
+                color_continuous_scale="RdYlGn",
+                text="EV (%)"
             )
+            fig.update_layout(yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig, use_container_width=True)
