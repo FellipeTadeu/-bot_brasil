@@ -3,6 +3,5 @@ pandas
 numpy
 scipy
 plotly
-selenium
-webdriver-manager
 requests
+beautifulsoup4
