@@ -54,25 +54,34 @@ URLS_LIGAS = {
 }
 
 # ==============================================================================
-# MOTOR DE SCRAPING (SELENIUM)
+# MOTOR DE SCRAPING (SELENIUM) - BLINDADO PARA CLOUD
 # ==============================================================================
 
 @st.cache_resource
 def iniciar_driver():
-    """Inicia o navegador Chrome em modo invisível (Headless)."""
+    """Inicia o navegador Chrome em modo invisível (Compatível com Streamlit Cloud)."""
     chrome_options = Options()
-    chrome_options.add_argument("--headless") # Roda sem abrir janela
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36")
+    chrome_options.add_argument("--disable-gpu")
     
+    # Tenta forçar o uso do Chromium instalado pelo packages.txt
     try:
-        service = Service(ChromeDriverManager().install())
+        chrome_options.binary_location = "/usr/bin/chromium"
+        service = Service("/usr/bin/chromedriver")
         driver = webdriver.Chrome(service=service, options=chrome_options)
         return driver
-    except Exception as e:
-        st.error(f"Erro ao iniciar Driver: {e}")
-        return None
+    except:
+        # Fallback: Se não achar o caminho padrão, tenta usar o webdriver_manager
+        try:
+            from webdriver_manager.chrome import ChromeDriverManager
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            return driver
+        except Exception as e:
+            st.error(f"Erro crítico ao iniciar o navegador: {e}")
+            return None
 
 @st.cache_data(ttl=1800) # Cache de 30min para não ser bloqueado
 def raspar_jogos_do_site(url_liga):
