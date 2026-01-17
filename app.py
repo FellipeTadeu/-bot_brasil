@@ -59,28 +59,32 @@ URLS_LIGAS = {
 
 @st.cache_resource
 def iniciar_driver():
-    """Inicia o navegador Chrome em modo invisível (Compatível com Streamlit Cloud)."""
+    """Inicia o navegador Chrome em modo invisível (Configuração Específica para Streamlit Cloud)."""
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920,1080")
     
-    # Tenta forçar o uso do Chromium instalado pelo packages.txt
+    # Caminho padrão do Chromium no ambiente Linux do Streamlit
+    chrome_options.binary_location = "/usr/bin/chromium"
+    
     try:
-        chrome_options.binary_location = "/usr/bin/chromium"
+        # Tenta usar o driver do sistema primeiro (instalado via packages.txt)
         service = Service("/usr/bin/chromedriver")
         driver = webdriver.Chrome(service=service, options=chrome_options)
         return driver
-    except:
-        # Fallback: Se não achar o caminho padrão, tenta usar o webdriver_manager
+    except Exception as e:
+        # Se falhar, tenta o fallback com webdriver_manager (Plan B)
         try:
             from webdriver_manager.chrome import ChromeDriverManager
+            # Instala uma versão compatível automaticamente
             service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=chrome_options)
             return driver
-        except Exception as e:
-            st.error(f"Erro crítico ao iniciar o navegador: {e}")
+        except Exception as e2:
+            st.error(f"Erro crítico ao iniciar navegador: {e} | {e2}")
             return None
 
 @st.cache_data(ttl=1800) # Cache de 30min para não ser bloqueado
